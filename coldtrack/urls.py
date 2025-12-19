@@ -12,6 +12,21 @@ from django.views.decorators.csrf import csrf_exempt
 import requests
 from datetime import date, datetime, timedelta
 
+def api_root(request):
+    """Vista raíz de la API"""
+    return JsonResponse({
+        'message': 'ColdTrack API funcionando correctamente',
+        'version': '1.0.0',
+        'endpoints': {
+            'auth': '/api/auth/',
+            'users': '/api/users/',
+            'sucursales': '/api/sucursales/',
+            'camaras': '/api/camaras/',
+            'dashboard': '/api/dashboard/',
+            'eventos': '/api/eventos/'
+        }
+    })
+
 @csrf_exempt
 def test_kpis_direct(request):
     """Vista de KPIs directa para testing"""
@@ -291,6 +306,10 @@ def buscar_eventos_historicos(request):
         })
 
 urlpatterns = [
+    # API Root
+    path('', api_root, name='api-root'),
+    path('api/', api_root, name='api-root-with-prefix'),
+    
     # Django Admin
     path('admin/', admin.site.urls),
     
