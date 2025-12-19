@@ -305,10 +305,25 @@ def buscar_eventos_historicos(request):
             'error': str(e)
         })
 
+def bypass_auth(request):
+    """Vista temporal para bypass de autenticación"""
+    return JsonResponse({
+        'user': {
+            'id': 1,
+            'email': 'admin@coldtrack.com',
+            'nombre': 'Administrador',
+            'rol': 'ADMIN'
+        },
+        'message': 'Bypass de autenticación activado'
+    })
+
 urlpatterns = [
     # API Root
     path('', api_root, name='api-root'),
     path('api/', api_root, name='api-root-with-prefix'),
+    
+    # Bypass temporal para autenticación
+    path('api/auth/bypass/', bypass_auth, name='auth-bypass'),
     
     # Django Admin
     path('admin/', admin.site.urls),
