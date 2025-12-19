@@ -1,0 +1,11 @@
+Django==4.2.8
+djangorestframework
+django-cors-headers
+requests
+firebase-admin
+supabase
+python-decouple
+gunicorn
+whitenoise
+psycopg2-binary
+dj-database-url

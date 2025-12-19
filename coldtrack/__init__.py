@@ -1,0 +1,1 @@
+# ColdTrack Backend - Django Application
