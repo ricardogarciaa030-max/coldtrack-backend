@@ -405,6 +405,148 @@ def sync_firebase_users(request):
             'message': 'Error en sincronización de usuarios'
         })
 
+def init_basic_data(request):
+    """Inicializar datos básicos: sucursales y cámaras"""
+    try:
+        from django.conf import settings
+        import requests
+        
+        config = settings.SUPABASE_CONFIG
+        headers = {
+            'apikey': config['service_key'],
+            'Authorization': f'Bearer {config["service_key"]}',
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+        }
+        
+        results = []
+        
+        # 1. Crear sucursal por defecto
+        sucursal_data = {
+            'nombre': 'CarnesKar_O´higgins',
+            'direccion': 'Av. O´Higgins 123, Santiago',
+            'activa': True
+        }
+        
+        # Verificar si ya existe
+        check_url = f'{config["url"]}/rest/v1/sucursales?nombre=eq.CarnesKar_O´higgins'
+        check_response = requests.get(check_url, headers=headers)
+        
+        if check_response.status_code == 200 and len(check_response.json()) == 0:
+            create_url = f'{config["url"]}/rest/v1/sucursales'
+            response = requests.post(create_url, json=sucursal_data, headers=headers)
+            if response.status_code in [200, 201]:
+                results.append("✅ Sucursal creada")
+            else:
+                results.append(f"❌ Error creando sucursal: {response.text}")
+        else:
+            results.append("✅ Sucursal ya existe")
+        
+        # 2. Obtener ID de sucursal
+        sucursal_response = requests.get(check_url, headers=headers)
+        if sucursal_response.status_code == 200 and len(sucursal_response.json()) > 0:
+            sucursal_id = sucursal_response.json()[0]['id']
+            
+            # 3. Crear cámara por defecto
+            camara_data = {
+                'nombre': 'Cámara 1',
+                'firebase_path': 'device_001',
+                'sucursal_id': sucursal_id,
+                'activa': True
+            }
+            
+            # Verificar si ya existe
+            check_camara_url = f'{config["url"]}/rest/v1/camaras_frio?nombre=eq.Cámara 1'
+            check_camara_response = requests.get(check_camara_url, headers=headers)
+            
+            if check_camara_response.status_code == 200 and len(check_camara_response.json()) == 0:
+                create_camara_url = f'{config["url"]}/rest/v1/camaras_frio'
+                camara_response = requests.post(create_camara_url, json=camara_data, headers=headers)
+                if camara_response.status_code in [200, 201]:
+                    results.append("✅ Cámara creada")
+                else:
+                    results.append(f"❌ Error creando cámara: {camara_response.text}")
+            else:
+                results.append("✅ Cámara ya existe")
+        
+        return JsonResponse({
+            'message': 'Inicialización de datos básicos completada',
+            'results': results
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': str(e),
+            'message': 'Error en inicialización de datos básicos'
+        })
+
+def test_supabase_connection(request):
+    """Probar conexión a Supabase y mostrar datos existentes"""
+    try:
+        from django.conf import settings
+        import requests
+        
+        config = settings.SUPABASE_CONFIG
+        headers = {
+            'apikey': config['service_key'],
+            'Authorization': f'Bearer {config["service_key"]}',
+            'Content-Type': 'application/json'
+        }
+        
+        results = {}
+        
+        # 1. Probar conexión básica
+        test_url = f'{config["url"]}/rest/v1/'
+        test_response = requests.get(test_url, headers=headers)
+        results['connection'] = f"Status: {test_response.status_code}"
+        
+        # 2. Contar usuarios
+        users_url = f'{config["url"]}/rest/v1/usuarios?select=count'
+        users_response = requests.get(users_url, headers=headers)
+        if users_response.status_code == 200:
+            results['usuarios'] = f"Encontrados: {len(users_response.json())} usuarios"
+        else:
+            results['usuarios'] = f"Error: {users_response.status_code} - {users_response.text}"
+        
+        # 3. Contar sucursales
+        sucursales_url = f'{config["url"]}/rest/v1/sucursales?select=*'
+        sucursales_response = requests.get(sucursales_url, headers=headers)
+        if sucursales_response.status_code == 200:
+            sucursales = sucursales_response.json()
+            results['sucursales'] = f"Encontradas: {len(sucursales)} sucursales"
+            if sucursales:
+                results['sucursales_list'] = [s['nombre'] for s in sucursales]
+        else:
+            results['sucursales'] = f"Error: {sucursales_response.status_code} - {sucursales_response.text}"
+        
+        # 4. Contar cámaras
+        camaras_url = f'{config["url"]}/rest/v1/camaras_frio?select=*'
+        camaras_response = requests.get(camaras_url, headers=headers)
+        if camaras_response.status_code == 200:
+            camaras = camaras_response.json()
+            results['camaras'] = f"Encontradas: {len(camaras)} cámaras"
+            if camaras:
+                results['camaras_list'] = [c['nombre'] for c in camaras]
+        else:
+            results['camaras'] = f"Error: {camaras_response.status_code} - {camaras_response.text}"
+        
+        # 5. Configuración actual
+        results['config'] = {
+            'supabase_url': config['url'],
+            'has_service_key': bool(config.get('service_key'))
+        }
+        
+        return JsonResponse({
+            'message': 'Test de conexión a Supabase',
+            'results': results
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': str(e),
+            'message': 'Error en test de conexión a Supabase'
+        })
+
 urlpatterns = [
     # API Root
     path('', api_root, name='api-root'),
@@ -413,8 +555,8 @@ urlpatterns = [
     # Bypass temporal para autenticación
     path('api/auth/bypass/', bypass_auth, name='auth-bypass'),
     
-    # Sincronización de usuarios
-    path('api/sync/users/', sync_firebase_users, name='sync-users'),
+    # Test de conexión a Supabase
+    path('api/test/supabase/', test_supabase_connection, name='test-supabase'),
     
     # Django Admin
     path('admin/', admin.site.urls),
