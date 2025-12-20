@@ -317,6 +317,68 @@ def bypass_auth(request):
         'message': 'Bypass de autenticación activado'
     })
 
+def sync_firebase_users(request):
+    """Sincronizar usuarios de Firebase Auth a Supabase"""
+    try:
+        from firebase_admin import auth
+        from django.conf import settings
+        import requests
+        
+        config = settings.SUPABASE_CONFIG
+        headers = {
+            'apikey': config['service_key'],
+            'Authorization': f'Bearer {config["service_key"]}',
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+        }
+        
+        # Obtener todos los usuarios de Firebase
+        page = auth.list_users()
+        users_synced = 0
+        users_found = 0
+        
+        while page:
+            for user in page.users:
+                users_found += 1
+                
+                # Verificar si el usuario ya existe en Supabase
+                check_url = f'{config["url"]}/rest/v1/usuarios?firebase_uid=eq.{user.uid}'
+                check_response = requests.get(check_url, headers=headers)
+                
+                if check_response.status_code == 200 and len(check_response.json()) > 0:
+                    continue  # Usuario ya existe
+                
+                # Crear usuario en Supabase
+                user_data = {
+                    'firebase_uid': user.uid,
+                    'email': user.email,
+                    'nombre': user.display_name or user.email.split('@')[0],
+                    'rol': 'ADMIN',  # Por defecto ADMIN
+                    'activo': not user.disabled,
+                    'sucursal_id': 1  # Sucursal por defecto
+                }
+                
+                create_url = f'{config["url"]}/rest/v1/usuarios'
+                create_response = requests.post(create_url, json=user_data, headers=headers)
+                
+                if create_response.status_code in [200, 201]:
+                    users_synced += 1
+            
+            # Siguiente página
+            page = page.get_next_page()
+        
+        return JsonResponse({
+            'message': f'Sincronización completada: {users_synced} usuarios sincronizados de {users_found} encontrados',
+            'users_found': users_found,
+            'users_synced': users_synced
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': str(e),
+            'message': 'Error en sincronización de usuarios'
+        })
+
 urlpatterns = [
     # API Root
     path('', api_root, name='api-root'),
@@ -324,6 +386,9 @@ urlpatterns = [
     
     # Bypass temporal para autenticación
     path('api/auth/bypass/', bypass_auth, name='auth-bypass'),
+    
+    # Sincronización de usuarios
+    path('api/sync/users/', sync_firebase_users, name='sync-users'),
     
     # Django Admin
     path('admin/', admin.site.urls),
