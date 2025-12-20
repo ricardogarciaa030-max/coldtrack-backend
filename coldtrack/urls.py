@@ -320,9 +320,35 @@ def bypass_auth(request):
 def sync_firebase_users(request):
     """Sincronizar usuarios de Firebase Auth a Supabase"""
     try:
-        from firebase_admin import auth
+        # Inicializar Firebase Admin SDK
+        import firebase_admin
+        from firebase_admin import credentials, auth
         from django.conf import settings
         import requests
+        import json
+        
+        # Verificar si Firebase ya está inicializado
+        try:
+            firebase_admin.get_app()
+        except ValueError:
+            # Firebase no está inicializado, inicializarlo
+            private_key = settings.FIREBASE_PRIVATE_KEY.replace('\\n', '\n')
+            
+            cred_dict = {
+                "type": "service_account",
+                "project_id": settings.FIREBASE_PROJECT_ID,
+                "private_key_id": "firebase-key-id",
+                "private_key": private_key,
+                "client_email": settings.FIREBASE_CLIENT_EMAIL,
+                "client_id": "firebase-client-id",
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{settings.FIREBASE_CLIENT_EMAIL}"
+            }
+            
+            cred = credentials.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred)
         
         config = settings.SUPABASE_CONFIG
         headers = {
