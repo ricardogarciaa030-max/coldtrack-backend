@@ -411,6 +411,7 @@ def sync_firebase_users(request):
         page = auth.list_users()
         users_synced = 0
         users_found = 0
+        users_updated = 0
         
         while page:
             for user in page.users:
@@ -420,38 +421,115 @@ def sync_firebase_users(request):
                 check_url = f'{config["url"]}/rest/v1/usuarios?firebase_uid=eq.{user.uid}'
                 check_response = requests.get(check_url, headers=headers)
                 
-                if check_response.status_code == 200 and len(check_response.json()) > 0:
-                    continue  # Usuario ya existe
-                
-                # Crear usuario en Supabase
-                user_data = {
-                    'firebase_uid': user.uid,
-                    'email': user.email,
-                    'nombre': user.display_name or user.email.split('@')[0],
-                    'rol': 'ADMIN',  # Por defecto ADMIN
-                    'activo': not user.disabled,
-                    'sucursal_id': 1  # Sucursal por defecto
-                }
-                
-                create_url = f'{config["url"]}/rest/v1/usuarios'
-                create_response = requests.post(create_url, json=user_data, headers=headers)
-                
-                if create_response.status_code in [200, 201]:
-                    users_synced += 1
+                if check_response.status_code == 200:
+                    existing_users = check_response.json()
+                    
+                    if len(existing_users) > 0:
+                        # Usuario existe, verificar si necesita actualización
+                        existing_user = existing_users[0]
+                        needs_update = False
+                        update_data = {}
+                        
+                        # Verificar email
+                        if existing_user.get('email') != user.email:
+                            update_data['email'] = user.email
+                            needs_update = True
+                        
+                        # Verificar nombre
+                        display_name = user.display_name or user.email.split('@')[0]
+                        if existing_user.get('nombre') != display_name:
+                            update_data['nombre'] = display_name
+                            needs_update = True
+                        
+                        # Verificar estado activo
+                        is_active = not user.disabled
+                        if existing_user.get('activo') != is_active:
+                            update_data['activo'] = is_active
+                            needs_update = True
+                        
+                        if needs_update:
+                            # Actualizar usuario existente
+                            update_url = f'{config["url"]}/rest/v1/usuarios?firebase_uid=eq.{user.uid}'
+                            update_response = requests.patch(update_url, json=update_data, headers=headers)
+                            
+                            if update_response.status_code in [200, 204]:
+                                users_updated += 1
+                    else:
+                        # Usuario no existe, crearlo
+                        user_data = {
+                            'firebase_uid': user.uid,
+                            'email': user.email,
+                            'nombre': user.display_name or user.email.split('@')[0],
+                            'rol': 'ADMIN',  # Por defecto ADMIN
+                            'activo': not user.disabled,
+                            'sucursal_id': 1  # Sucursal por defecto
+                        }
+                        
+                        create_url = f'{config["url"]}/rest/v1/usuarios'
+                        create_response = requests.post(create_url, json=user_data, headers=headers)
+                        
+                        if create_response.status_code in [200, 201]:
+                            users_synced += 1
             
             # Siguiente página
             page = page.get_next_page()
         
         return JsonResponse({
-            'message': f'Sincronización completada: {users_synced} usuarios sincronizados de {users_found} encontrados',
+            'message': f'Sincronización completada: {users_synced} usuarios nuevos sincronizados, {users_updated} actualizados de {users_found} encontrados',
             'users_found': users_found,
-            'users_synced': users_synced
+            'users_synced': users_synced,
+            'users_updated': users_updated,
+            'status': 'success'
         })
         
     except Exception as e:
         return JsonResponse({
             'error': str(e),
             'message': 'Error en sincronización de usuarios'
+        })
+
+
+def start_auto_sync(request):
+    """Iniciar sincronización automática de usuarios cada hora"""
+    try:
+        import subprocess
+        import os
+        
+        # Ejecutar comando de sincronización automática en background
+        manage_py_path = os.path.join(settings.BASE_DIR, 'manage.py')
+        
+        # Comando para ejecutar en background
+        cmd = [
+            'python', manage_py_path, 'auto_sync_users', '--interval', '3600'
+        ]
+        
+        # En producción, usar nohup para que siga ejecutándose
+        if not settings.DEBUG:
+            # En producción (Render), iniciar como proceso en background
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=settings.BASE_DIR
+            )
+            
+            return JsonResponse({
+                'message': 'Sincronización automática iniciada (cada 1 hora)',
+                'process_id': process.pid,
+                'status': 'started'
+            })
+        else:
+            # En desarrollo, solo mostrar el comando
+            return JsonResponse({
+                'message': 'Para iniciar sincronización automática, ejecuta:',
+                'command': ' '.join(cmd),
+                'note': 'En desarrollo, ejecutar manualmente'
+            })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': str(e),
+            'message': 'Error al iniciar sincronización automática'
         })
 
 def init_basic_data(request):
@@ -609,6 +687,9 @@ urlpatterns = [
     
     # Sincronización de usuarios Firebase -> Supabase
     path('api/sync/users/', sync_firebase_users, name='sync-firebase-users'),
+    
+    # Iniciar sincronización automática
+    path('api/sync/auto-start/', start_auto_sync, name='start-auto-sync'),
     
     # Inicializar datos básicos
     path('api/init/basic/', init_basic_data, name='init-basic-data'),

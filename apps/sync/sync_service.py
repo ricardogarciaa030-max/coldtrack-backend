@@ -91,6 +91,106 @@ def on_status_change(device_id, timestamp_key, data):
     except Exception as e:
         logger.error(f"❌ Error en sincronización de lectura: {str(e)}")
 
+def sync_users_periodic():
+    """Sincronización periódica de usuarios Firebase Auth → Supabase"""
+    try:
+        import firebase_admin
+        from firebase_admin import auth
+        from django.conf import settings
+        import requests
+        
+        # Verificar si Firebase ya está inicializado
+        try:
+            firebase_admin.get_app()
+        except ValueError:
+            logger.warning("Firebase no inicializado para sincronización de usuarios")
+            return
+        
+        config = settings.SUPABASE_CONFIG
+        headers = {
+            'apikey': config['service_key'],
+            'Authorization': f'Bearer {config["service_key"]}',
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+        }
+        
+        # Obtener usuarios de Firebase Auth
+        page = auth.list_users()
+        users_synced = 0
+        users_updated = 0
+        
+        while page:
+            for user in page.users:
+                try:
+                    # Verificar si el usuario ya existe en Supabase
+                    check_url = f'{config["url"]}/rest/v1/usuarios?firebase_uid=eq.{user.uid}'
+                    check_response = requests.get(check_url, headers=headers)
+                    
+                    if check_response.status_code == 200:
+                        existing_users = check_response.json()
+                        
+                        if len(existing_users) > 0:
+                            # Usuario existe, verificar si necesita actualización
+                            existing_user = existing_users[0]
+                            needs_update = False
+                            update_data = {}
+                            
+                            # Verificar email
+                            if existing_user.get('email') != user.email:
+                                update_data['email'] = user.email
+                                needs_update = True
+                            
+                            # Verificar nombre
+                            display_name = user.display_name or user.email.split('@')[0]
+                            if existing_user.get('nombre') != display_name:
+                                update_data['nombre'] = display_name
+                                needs_update = True
+                            
+                            # Verificar estado activo
+                            is_active = not user.disabled
+                            if existing_user.get('activo') != is_active:
+                                update_data['activo'] = is_active
+                                needs_update = True
+                            
+                            if needs_update:
+                                # Actualizar usuario existente
+                                update_url = f'{config["url"]}/rest/v1/usuarios?firebase_uid=eq.{user.uid}'
+                                update_response = requests.patch(update_url, json=update_data, headers=headers)
+                                
+                                if update_response.status_code in [200, 204]:
+                                    users_updated += 1
+                                    logger.info(f"👤 Usuario actualizado: {user.email}")
+                        else:
+                            # Usuario no existe, crearlo
+                            user_data = {
+                                'firebase_uid': user.uid,
+                                'email': user.email,
+                                'nombre': user.display_name or user.email.split('@')[0],
+                                'rol': 'ADMIN',  # Por defecto ADMIN
+                                'activo': not user.disabled,
+                                'sucursal_id': 1  # Sucursal por defecto
+                            }
+                            
+                            create_url = f'{config["url"]}/rest/v1/usuarios'
+                            create_response = requests.post(create_url, json=user_data, headers=headers)
+                            
+                            if create_response.status_code in [200, 201]:
+                                users_synced += 1
+                                logger.info(f"👤 Usuario sincronizado: {user.email}")
+                
+                except Exception as user_error:
+                    logger.error(f"Error procesando usuario {user.email}: {str(user_error)}")
+                    continue
+            
+            # Siguiente página
+            page = page.get_next_page()
+        
+        if users_synced > 0 or users_updated > 0:
+            logger.info(f"👥 Sincronización de usuarios: {users_synced} nuevos, {users_updated} actualizados")
+        
+    except Exception as e:
+        logger.error(f"Error en sincronización de usuarios: {str(e)}")
+
 def sync_events_periodic():
     """Sincronización periódica de eventos usando firebase_event_id"""
     try:
@@ -290,12 +390,21 @@ def start_sync_service():
         logger.info("✅ Listeners en tiempo real configurados")
         logger.info("🔄 Iniciando sincronización periódica cada 30 segundos...")
         
+        # Contador para sincronización de usuarios (cada 10 minutos = 20 ciclos de 30s)
+        user_sync_counter = 0
+        
         # Bucle principal con sincronización periódica
         while True:
             time.sleep(30)  # Esperar 30 segundos
             
-            # Ejecutar sincronización periódica
+            # Ejecutar sincronización periódica de eventos
             sync_events_periodic()
+            
+            # Sincronizar usuarios cada 10 minutos (20 ciclos)
+            user_sync_counter += 1
+            if user_sync_counter >= 20:  # 20 * 30 segundos = 10 minutos
+                sync_users_periodic()
+                user_sync_counter = 0
             
     except Exception as e:
         logger.error(f"💥 Error fatal en servicio de sincronización: {str(e)}")
