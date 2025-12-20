@@ -33,11 +33,12 @@ class FirebaseAuthMiddleware(MiddlewareMixin):
     # Rutas que no requieren autenticación
     EXEMPT_URLS = [
         '/admin/',
-        '/api/auth/verify-token/',
-        '/api/dashboard/',  # Temporalmente para debug
-        '/api/camaras/',    # Temporalmente para debug
-        '/api/sucursales/', # Temporalmente para debug
-        '/api/users/',      # Temporalmente para debug de usuarios
+        '/api/auth/',           # Todos los endpoints de auth
+        '/api/test/',           # Endpoints de testing
+        '/api/sync/users/',     # Sincronización de usuarios
+        '/api/init/',           # Inicialización de datos
+        '/',                    # API root
+        '/api/',                # API root con prefijo
     ]
     
     def process_request(self, request):

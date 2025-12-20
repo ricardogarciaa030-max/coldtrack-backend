@@ -305,17 +305,63 @@ def buscar_eventos_historicos(request):
             'error': str(e)
         })
 
-def bypass_auth(request):
-    """Vista temporal para bypass de autenticación"""
-    return JsonResponse({
-        'user': {
-            'id': 1,
-            'email': 'admin@coldtrack.com',
-            'nombre': 'Administrador',
-            'rol': 'ADMIN'
-        },
-        'message': 'Bypass de autenticación activado'
-    })
+def test_auth_flow(request):
+    """Test completo del flujo de autenticación"""
+    try:
+        from django.conf import settings
+        import requests
+        
+        # 1. Verificar configuración de Firebase
+        firebase_config = {
+            'project_id': getattr(settings, 'FIREBASE_PROJECT_ID', 'NO_CONFIG'),
+            'client_email': getattr(settings, 'FIREBASE_CLIENT_EMAIL', 'NO_CONFIG'),
+            'has_private_key': bool(getattr(settings, 'FIREBASE_PRIVATE_KEY', '')),
+            'database_url': getattr(settings, 'FIREBASE_DATABASE_URL', 'NO_CONFIG'),
+        }
+        
+        # 2. Verificar conexión a Supabase
+        config = settings.SUPABASE_CONFIG
+        headers = {
+            'apikey': config['service_key'],
+            'Authorization': f'Bearer {config["service_key"]}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Contar usuarios en Supabase
+        users_url = f'{config["url"]}/rest/v1/usuarios?select=*'
+        users_response = requests.get(users_url, headers=headers)
+        
+        supabase_status = {
+            'connection': users_response.status_code == 200,
+            'users_count': len(users_response.json()) if users_response.status_code == 200 else 0,
+            'users': users_response.json() if users_response.status_code == 200 else []
+        }
+        
+        # 3. Verificar inicialización de Firebase
+        firebase_status = 'NOT_INITIALIZED'
+        try:
+            from services.firebase_service import initialize_firebase
+            if initialize_firebase():
+                firebase_status = 'INITIALIZED'
+            else:
+                firebase_status = 'FAILED_TO_INITIALIZE'
+        except Exception as e:
+            firebase_status = f'ERROR: {str(e)}'
+        
+        return JsonResponse({
+            'message': 'Test de flujo de autenticación',
+            'firebase_config': firebase_config,
+            'firebase_status': firebase_status,
+            'supabase_status': supabase_status,
+            'cors_origins': getattr(settings, 'CORS_ALLOWED_ORIGINS', []),
+            'debug_mode': settings.DEBUG
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': str(e),
+            'message': 'Error en test de autenticación'
+        })
 
 def sync_firebase_users(request):
     """Sincronizar usuarios de Firebase Auth a Supabase"""
@@ -552,11 +598,17 @@ urlpatterns = [
     path('', api_root, name='api-root'),
     path('api/', api_root, name='api-root-with-prefix'),
     
-    # Bypass temporal para autenticación
-    path('api/auth/bypass/', bypass_auth, name='auth-bypass'),
+    # Test de flujo de autenticación
+    path('api/test/auth/', test_auth_flow, name='test-auth-flow'),
     
     # Test de conexión a Supabase
     path('api/test/supabase/', test_supabase_connection, name='test-supabase'),
+    
+    # Sincronización de usuarios Firebase -> Supabase
+    path('api/sync/users/', sync_firebase_users, name='sync-firebase-users'),
+    
+    # Inicializar datos básicos
+    path('api/init/basic/', init_basic_data, name='init-basic-data'),
     
     # Django Admin
     path('admin/', admin.site.urls),

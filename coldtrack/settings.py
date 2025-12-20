@@ -171,15 +171,45 @@ CORS_ALLOWED_ORIGINS = config(
 
 CORS_ALLOW_CREDENTIALS = True
 
+# Additional CORS settings for better compatibility
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Allow all origins in development
+CORS_ALLOWED_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
 # Firebase Configuration
 FIREBASE_CREDENTIALS_PATH = config('FIREBASE_CREDENTIALS_PATH', default=None)
+
+# Firebase Admin SDK Configuration
+FIREBASE_PROJECT_ID = config('FIREBASE_PROJECT_ID', default='')
+FIREBASE_CLIENT_EMAIL = config('FIREBASE_CLIENT_EMAIL', default='')
+FIREBASE_PRIVATE_KEY = config('FIREBASE_PRIVATE_KEY', default='')
+FIREBASE_DATABASE_URL = config('FIREBASE_DATABASE_URL', default='')
+
 FIREBASE_CONFIG = {
-    'project_id': config('FIREBASE_PROJECT_ID', default=''),
+    'project_id': FIREBASE_PROJECT_ID,
     'private_key_id': config('FIREBASE_PRIVATE_KEY_ID', default=''),
-    'private_key': config('FIREBASE_PRIVATE_KEY', default='').replace('\\n', '\n'),
-    'client_email': config('FIREBASE_CLIENT_EMAIL', default=''),
+    'private_key': FIREBASE_PRIVATE_KEY.replace('\\n', '\n') if FIREBASE_PRIVATE_KEY else '',
+    'client_email': FIREBASE_CLIENT_EMAIL,
     'client_id': config('FIREBASE_CLIENT_ID', default=''),
-    'database_url': config('FIREBASE_DATABASE_URL', default=''),
+    'database_url': FIREBASE_DATABASE_URL,
 }
 
 # Supabase Configuration
