@@ -16,14 +16,17 @@ def api_root(request):
     """Vista raíz de la API"""
     return JsonResponse({
         'message': 'ColdTrack API funcionando correctamente',
-        'version': '1.0.0',
+        'version': '1.0.1',  # Incrementado para forzar redespliegue
+        'status': 'UPDATED',
         'endpoints': {
             'auth': '/api/auth/',
             'users': '/api/users/',
             'sucursales': '/api/sucursales/',
             'camaras': '/api/camaras/',
             'dashboard': '/api/dashboard/',
-            'eventos': '/api/eventos/'
+            'eventos': '/api/eventos/',
+            'test': '/api/test/',
+            'sync': '/api/sync/'
         }
     })
 
