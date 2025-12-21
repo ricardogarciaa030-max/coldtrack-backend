@@ -7,6 +7,7 @@ como parte del backend Django.
 
 import time
 import logging
+import os
 from datetime import datetime, date
 from firebase_admin import db
 from services.firebase_service import initialize_firebase
@@ -347,12 +348,15 @@ def start_sync_service():
     
     try:
         logger.info("🚀 Iniciando servicio de sincronización Firebase → Supabase")
+        logger.info(f"🌍 Entorno: {'Desarrollo' if os.environ.get('DEBUG', 'False') == 'True' else 'Producción'}")
         
         # Inicializar Firebase
         if not initialize_firebase():
             logger.error("❌ No se pudo inicializar Firebase")
             sync_service_running = False
             return
+        
+        logger.info("✅ Firebase inicializado correctamente")
         
         # Obtener dispositivos
         devices_ref = db.reference('/status')
@@ -364,49 +368,15 @@ def start_sync_service():
         else:
             logger.info(f"📱 Dispositivos encontrados: {list(devices.keys())}")
             
-            # Configurar listeners para cada dispositivo (tiempo real)
-            for device_id in devices.keys():
-                logger.info(f"🔧 Configurando listeners para: {device_id}")
-                
-                try:
-                    # Listener para eventos del día actual
-                    today = date.today()
-                    year = today.year
-                    month = str(today.month).zfill(2)
-                    day = str(today.day).zfill(2)
-                    
-                    events_path = f'/eventos/{device_id}/{year}/{month}/{day}'
-                    events_ref = db.reference(events_path)
-                    
-                    def make_event_callback(dev_id):
-                        def callback(event):
-                            if event.data:
-                                for evt_id, data in event.data.items():
-                                    on_event_change(dev_id, evt_id, data)
-                        return callback
-                    
-                    events_ref.listen(make_event_callback(device_id))
-                    logger.info(f"  ✓ Eventos tiempo real: {events_path}")
-                    
-                    # Listener para status en tiempo real
-                    status_path = f'/status/{device_id}/{year}/{month}/{day}'
-                    status_ref = db.reference(status_path)
-                    
-                    def make_status_callback(dev_id):
-                        def callback(event):
-                            if event.data:
-                                for ts_key, data in event.data.items():
-                                    on_status_change(dev_id, ts_key, data)
-                        return callback
-                    
-                    status_ref.listen(make_status_callback(device_id))
-                    logger.info(f"  ✓ Status tiempo real: {status_path}")
-                    
-                except Exception as listener_error:
-                    logger.error(f"❌ Error configurando listeners para {device_id}: {str(listener_error)}")
-                    continue
+            # En producción, solo usar sincronización periódica (más estable)
+            # Los listeners en tiempo real pueden causar problemas en Render
+            if os.environ.get('DEBUG', 'False') == 'True':
+                # Solo en desarrollo usar listeners
+                logger.info("🔧 Configurando listeners en tiempo real (desarrollo)")
+                setup_realtime_listeners(devices)
+            else:
+                logger.info("🔧 Modo producción: solo sincronización periódica")
         
-        logger.info("✅ Listeners en tiempo real configurados")
         logger.info("🔄 Iniciando sincronización periódica cada 30 segundos...")
         
         # Contador para sincronización de usuarios (cada 10 minutos = 20 ciclos de 30s)
@@ -419,7 +389,7 @@ def start_sync_service():
                 time.sleep(30)  # Esperar 30 segundos
                 cycle_count += 1
                 
-                logger.info(f"🔄 Ciclo de sincronización #{cycle_count}")
+                logger.info(f"🔄 Ciclo de sincronización #{cycle_count} - {datetime.now().strftime('%H:%M:%S')}")
                 
                 # Ejecutar sincronización periódica de eventos
                 sync_events_periodic()
@@ -444,6 +414,52 @@ def start_sync_service():
     finally:
         sync_service_running = False
         logger.info("🛑 Servicio de sincronización detenido")
+
+
+def setup_realtime_listeners(devices):
+    """Configurar listeners en tiempo real (solo para desarrollo)"""
+    import os
+    
+    for device_id in devices.keys():
+        logger.info(f"🔧 Configurando listeners para: {device_id}")
+        
+        try:
+            # Listener para eventos del día actual
+            today = date.today()
+            year = today.year
+            month = str(today.month).zfill(2)
+            day = str(today.day).zfill(2)
+            
+            events_path = f'/eventos/{device_id}/{year}/{month}/{day}'
+            events_ref = db.reference(events_path)
+            
+            def make_event_callback(dev_id):
+                def callback(event):
+                    if event.data:
+                        for evt_id, data in event.data.items():
+                            on_event_change(dev_id, evt_id, data)
+                return callback
+            
+            events_ref.listen(make_event_callback(device_id))
+            logger.info(f"  ✓ Eventos tiempo real: {events_path}")
+            
+            # Listener para status en tiempo real
+            status_path = f'/status/{device_id}/{year}/{month}/{day}'
+            status_ref = db.reference(status_path)
+            
+            def make_status_callback(dev_id):
+                def callback(event):
+                    if event.data:
+                        for ts_key, data in event.data.items():
+                            on_status_change(dev_id, ts_key, data)
+                return callback
+            
+            status_ref.listen(make_status_callback(device_id))
+            logger.info(f"  ✓ Status tiempo real: {status_path}")
+            
+        except Exception as listener_error:
+            logger.error(f"❌ Error configurando listeners para {device_id}: {str(listener_error)}")
+            continue
 
 
 def stop_sync_service():
