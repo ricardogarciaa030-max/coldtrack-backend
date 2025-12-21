@@ -489,6 +489,40 @@ def sync_firebase_users(request):
         })
 
 
+def start_background_sync(request):
+    """Iniciar sincronización en background dentro del proceso Django"""
+    try:
+        import threading
+        from apps.sync.sync_service import start_sync_service, is_sync_service_running
+        
+        # Verificar si ya está corriendo
+        if is_sync_service_running():
+            return JsonResponse({
+                'message': 'Servicio de sincronización ya está ejecutándose',
+                'status': 'already_running'
+            })
+        
+        # Iniciar en un hilo separado
+        sync_thread = threading.Thread(
+            target=start_sync_service,
+            daemon=True,
+            name='firebase-sync-background'
+        )
+        sync_thread.start()
+        
+        return JsonResponse({
+            'message': 'Servicio de sincronización iniciado en background',
+            'thread_name': sync_thread.name,
+            'thread_alive': sync_thread.is_alive(),
+            'status': 'started'
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': str(e),
+            'message': 'Error iniciando sincronización en background'
+        })
+
 def check_sync_service_status(request):
     """Verificar el estado del servicio de sincronización"""
     try:
@@ -763,6 +797,9 @@ urlpatterns = [
     
     # Test de conexión a Supabase
     path('api/test/supabase/', test_supabase_connection, name='test-supabase'),
+    
+    # Iniciar sincronización en background
+    path('api/sync/start-background/', start_background_sync, name='start-background-sync'),
     
     # Verificar estado del servicio de sincronización
     path('api/sync/status/', check_sync_service_status, name='check-sync-status'),
