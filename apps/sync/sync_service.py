@@ -195,6 +195,84 @@ def sync_users_periodic():
     except Exception as e:
         logger.error(f"Error en sincronización de usuarios: {str(e)}")
 
+def sync_temperature_readings_periodic():
+    """Sincronización periódica de lecturas de temperatura"""
+    try:
+        client = get_supabase_client(use_service_key=True)
+        
+        # Obtener datos de status de Firebase
+        status_ref = db.reference('status')
+        status_data = status_ref.get()
+        
+        if not status_data:
+            return
+        
+        lecturas_procesadas = 0
+        
+        for device_id, device_status in status_data.items():
+            camera = get_camera_by_firebase_path(device_id)
+            if not camera:
+                continue
+            
+            # Procesar por año/mes/día
+            for year, year_data in device_status.items():
+                if not isinstance(year_data, dict) or year == 'live':
+                    continue
+                    
+                for month, month_data in year_data.items():
+                    if not isinstance(month_data, dict):
+                        continue
+                        
+                    for day, day_data in month_data.items():
+                        if not isinstance(day_data, dict):
+                            continue
+                        
+                        # Procesar cada lectura del día
+                        for timestamp_key, reading_data in day_data.items():
+                            if not isinstance(reading_data, dict) or timestamp_key == 'live':
+                                continue
+                            
+                            try:
+                                # Convertir timestamp
+                                timestamp = datetime.fromtimestamp(int(timestamp_key))
+                                
+                                # Verificar si la lectura ya existe
+                                existing = client.table('lecturas_temperatura')\
+                                    .select('id')\
+                                    .eq('camara_id', camera['id'])\
+                                    .eq('timestamp', timestamp.isoformat())\
+                                    .execute()
+                                
+                                if existing.data and len(existing.data) > 0:
+                                    continue  # Ya existe
+                                
+                                # Insertar nueva lectura
+                                lectura_data = {
+                                    'camara_id': camera['id'],
+                                    'timestamp': timestamp.isoformat(),
+                                    'temperatura_c': float(reading_data.get('temp', 0)),
+                                    'estado': reading_data.get('state', 'NORMAL'),
+                                    'origen': 'firebase:status'
+                                }
+                                
+                                result = client.table('lecturas_temperatura')\
+                                    .insert(lectura_data)\
+                                    .execute()
+                                
+                                if result.data:
+                                    lecturas_procesadas += 1
+                                    logger.info(f"📊 Lectura sincronizada: {camera['nombre']} - {reading_data.get('temp')}°C - {timestamp.strftime('%H:%M:%S')}")
+                                
+                            except Exception as e:
+                                logger.error(f"Error procesando lectura {timestamp_key}: {str(e)}")
+                                continue
+        
+        if lecturas_procesadas > 0:
+            logger.info(f"📊 Sincronización de lecturas: {lecturas_procesadas} lecturas procesadas")
+        
+    except Exception as e:
+        logger.error(f"Error en sincronización de lecturas: {str(e)}")
+
 def sync_events_periodic():
     """Sincronización periódica de eventos usando firebase_event_id"""
     try:
@@ -398,6 +476,9 @@ def start_sync_service():
                 
                 # Ejecutar sincronización periódica de eventos
                 sync_events_periodic()
+                
+                # Ejecutar sincronización periódica de lecturas de temperatura
+                sync_temperature_readings_periodic()
                 
                 # Sincronizar usuarios cada 10 minutos (20 ciclos)
                 user_sync_counter += 1
