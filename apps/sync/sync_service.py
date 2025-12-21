@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 # Diccionario para rastrear eventos procesados
 processed_events = {}
 
+# Variable global para controlar el estado del servicio
+sync_service_running = False
+
 def on_event_change(device_id, event_id, data):
     """Callback cuando cambia un evento en Firebase"""
     try:
@@ -334,11 +337,22 @@ def start_sync_service():
     - Listeners en tiempo real para cambios inmediatos
     - Sincronización periódica cada 30 segundos para garantizar consistencia
     """
+    global sync_service_running
+    
+    if sync_service_running:
+        logger.warning("🔄 Servicio de sincronización ya está ejecutándose")
+        return
+    
+    sync_service_running = True
+    
     try:
         logger.info("🚀 Iniciando servicio de sincronización Firebase → Supabase")
         
         # Inicializar Firebase
-        initialize_firebase()
+        if not initialize_firebase():
+            logger.error("❌ No se pudo inicializar Firebase")
+            sync_service_running = False
+            return
         
         # Obtener dispositivos
         devices_ref = db.reference('/status')
@@ -346,67 +360,99 @@ def start_sync_service():
         
         if not devices:
             logger.warning("⚠️ No se encontraron dispositivos en Firebase")
-            return
-        
-        logger.info(f"📱 Dispositivos encontrados: {list(devices.keys())}")
-        
-        # Configurar listeners para cada dispositivo (tiempo real)
-        for device_id in devices.keys():
-            logger.info(f"🔧 Configurando listeners para: {device_id}")
+            # Continuar con sincronización periódica aunque no haya dispositivos
+        else:
+            logger.info(f"📱 Dispositivos encontrados: {list(devices.keys())}")
             
-            # Listener para eventos del día actual
-            today = date.today()
-            year = today.year
-            month = str(today.month).zfill(2)
-            day = str(today.day).zfill(2)
-            
-            events_path = f'/eventos/{device_id}/{year}/{month}/{day}'
-            events_ref = db.reference(events_path)
-            
-            def make_event_callback(dev_id):
-                def callback(event):
-                    if event.data:
-                        for evt_id, data in event.data.items():
-                            on_event_change(dev_id, evt_id, data)
-                return callback
-            
-            events_ref.listen(make_event_callback(device_id))
-            logger.info(f"  ✓ Eventos tiempo real: {events_path}")
-            
-            # Listener para status en tiempo real
-            status_path = f'/status/{device_id}/{year}/{month}/{day}'
-            status_ref = db.reference(status_path)
-            
-            def make_status_callback(dev_id):
-                def callback(event):
-                    if event.data:
-                        for ts_key, data in event.data.items():
-                            on_status_change(dev_id, ts_key, data)
-                return callback
-            
-            status_ref.listen(make_status_callback(device_id))
-            logger.info(f"  ✓ Status tiempo real: {status_path}")
+            # Configurar listeners para cada dispositivo (tiempo real)
+            for device_id in devices.keys():
+                logger.info(f"🔧 Configurando listeners para: {device_id}")
+                
+                try:
+                    # Listener para eventos del día actual
+                    today = date.today()
+                    year = today.year
+                    month = str(today.month).zfill(2)
+                    day = str(today.day).zfill(2)
+                    
+                    events_path = f'/eventos/{device_id}/{year}/{month}/{day}'
+                    events_ref = db.reference(events_path)
+                    
+                    def make_event_callback(dev_id):
+                        def callback(event):
+                            if event.data:
+                                for evt_id, data in event.data.items():
+                                    on_event_change(dev_id, evt_id, data)
+                        return callback
+                    
+                    events_ref.listen(make_event_callback(device_id))
+                    logger.info(f"  ✓ Eventos tiempo real: {events_path}")
+                    
+                    # Listener para status en tiempo real
+                    status_path = f'/status/{device_id}/{year}/{month}/{day}'
+                    status_ref = db.reference(status_path)
+                    
+                    def make_status_callback(dev_id):
+                        def callback(event):
+                            if event.data:
+                                for ts_key, data in event.data.items():
+                                    on_status_change(dev_id, ts_key, data)
+                        return callback
+                    
+                    status_ref.listen(make_status_callback(device_id))
+                    logger.info(f"  ✓ Status tiempo real: {status_path}")
+                    
+                except Exception as listener_error:
+                    logger.error(f"❌ Error configurando listeners para {device_id}: {str(listener_error)}")
+                    continue
         
         logger.info("✅ Listeners en tiempo real configurados")
         logger.info("🔄 Iniciando sincronización periódica cada 30 segundos...")
         
         # Contador para sincronización de usuarios (cada 10 minutos = 20 ciclos de 30s)
         user_sync_counter = 0
+        cycle_count = 0
         
         # Bucle principal con sincronización periódica
-        while True:
-            time.sleep(30)  # Esperar 30 segundos
-            
-            # Ejecutar sincronización periódica de eventos
-            sync_events_periodic()
-            
-            # Sincronizar usuarios cada 10 minutos (20 ciclos)
-            user_sync_counter += 1
-            if user_sync_counter >= 20:  # 20 * 30 segundos = 10 minutos
-                sync_users_periodic()
-                user_sync_counter = 0
+        while sync_service_running:
+            try:
+                time.sleep(30)  # Esperar 30 segundos
+                cycle_count += 1
+                
+                logger.info(f"🔄 Ciclo de sincronización #{cycle_count}")
+                
+                # Ejecutar sincronización periódica de eventos
+                sync_events_periodic()
+                
+                # Sincronizar usuarios cada 10 minutos (20 ciclos)
+                user_sync_counter += 1
+                if user_sync_counter >= 20:  # 20 * 30 segundos = 10 minutos
+                    sync_users_periodic()
+                    user_sync_counter = 0
+                
+                logger.info(f"✅ Ciclo #{cycle_count} completado")
+                
+            except Exception as cycle_error:
+                logger.error(f"❌ Error en ciclo de sincronización #{cycle_count}: {str(cycle_error)}")
+                # Continuar con el siguiente ciclo
+                continue
             
     except Exception as e:
         logger.error(f"💥 Error fatal en servicio de sincronización: {str(e)}")
         import traceback
         traceback.print_exc()
+    finally:
+        sync_service_running = False
+        logger.info("🛑 Servicio de sincronización detenido")
+
+
+def stop_sync_service():
+    """Detener el servicio de sincronización"""
+    global sync_service_running
+    sync_service_running = False
+    logger.info("🛑 Solicitando detención del servicio de sincronización")
+
+
+def is_sync_service_running():
+    """Verificar si el servicio está ejecutándose"""
+    return sync_service_running

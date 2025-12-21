@@ -489,6 +489,85 @@ def sync_firebase_users(request):
         })
 
 
+def check_sync_service_status(request):
+    """Verificar el estado del servicio de sincronización"""
+    try:
+        import threading
+        import time
+        from datetime import datetime
+        
+        # Obtener información de hilos activos
+        active_threads = threading.active_count()
+        thread_names = [t.name for t in threading.enumerate()]
+        
+        # Verificar si existe el hilo de sincronización
+        sync_thread_active = any('firebase-sync' in name for name in thread_names)
+        
+        # Información del sistema
+        status_info = {
+            'sync_service_active': sync_thread_active,
+            'active_threads': active_threads,
+            'thread_names': thread_names,
+            'current_time': datetime.now().isoformat(),
+            'django_ready': True
+        }
+        
+        # Si el servicio no está activo, intentar iniciarlo
+        if not sync_thread_active:
+            try:
+                from apps.sync.sync_service import start_sync_service
+                import threading
+                
+                # Crear hilo para el servicio de sincronización
+                sync_thread = threading.Thread(
+                    target=start_sync_service,
+                    daemon=True,
+                    name='firebase-sync-manual'
+                )
+                sync_thread.start()
+                
+                status_info['action'] = 'Servicio de sincronización iniciado manualmente'
+                status_info['new_thread_started'] = True
+                
+            except Exception as start_error:
+                status_info['start_error'] = str(start_error)
+        
+        return JsonResponse(status_info)
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': str(e),
+            'message': 'Error verificando estado del servicio'
+        })
+
+def force_sync_now(request):
+    """Forzar sincronización inmediata de eventos"""
+    try:
+        from apps.sync.sync_service import sync_events_periodic
+        from datetime import datetime
+        
+        start_time = datetime.now()
+        
+        # Ejecutar sincronización inmediata
+        sync_events_periodic()
+        
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        return JsonResponse({
+            'message': 'Sincronización forzada ejecutada',
+            'start_time': start_time.isoformat(),
+            'end_time': end_time.isoformat(),
+            'duration_seconds': duration,
+            'status': 'completed'
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': str(e),
+            'message': 'Error en sincronización forzada'
+        })
+
 def start_auto_sync(request):
     """Iniciar sincronización automática de usuarios cada hora"""
     try:
@@ -684,6 +763,12 @@ urlpatterns = [
     
     # Test de conexión a Supabase
     path('api/test/supabase/', test_supabase_connection, name='test-supabase'),
+    
+    # Verificar estado del servicio de sincronización
+    path('api/sync/status/', check_sync_service_status, name='check-sync-status'),
+    
+    # Forzar sincronización inmediata
+    path('api/sync/force/', force_sync_now, name='force-sync-now'),
     
     # Sincronización de usuarios Firebase -> Supabase
     path('api/sync/users/', sync_firebase_users, name='sync-firebase-users'),
