@@ -246,19 +246,15 @@ def sync_temperature_readings_periodic():
                                 if existing.data and len(existing.data) > 0:
                                     continue  # Ya existe
                                 
-                                # Insertar nueva lectura
-                                lectura_data = {
-                                    'camara_id': camera['id'],
-                                    'timestamp': timestamp.isoformat(),
-                                    'temperatura_c': float(reading_data.get('temp', 0)),
-                                    'origen': 'firebase:status'
-                                }
+                                # Insertar nueva lectura usando la función existente
+                                result = insert_temperature_reading(
+                                    camara_id=camera['id'],
+                                    timestamp=timestamp,
+                                    temperatura_c=float(reading_data.get('temp', 0)),
+                                    origen='firebase:status'
+                                )
                                 
-                                result = client.table('lecturas_temperatura')\
-                                    .insert(lectura_data)\
-                                    .execute()
-                                
-                                if result.data:
+                                if result:
                                     lecturas_procesadas += 1
                                     logger.info(f"📊 Lectura sincronizada: {camera['nombre']} - {reading_data.get('temp')}°C - {timestamp.strftime('%H:%M:%S')}")
                                 
