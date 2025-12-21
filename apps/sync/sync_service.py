@@ -251,7 +251,6 @@ def sync_temperature_readings_periodic():
                                     'camara_id': camera['id'],
                                     'timestamp': timestamp.isoformat(),
                                     'temperatura_c': float(reading_data.get('temp', 0)),
-                                    'estado': reading_data.get('state', 'NORMAL'),
                                     'origen': 'firebase:status'
                                 }
                                 
