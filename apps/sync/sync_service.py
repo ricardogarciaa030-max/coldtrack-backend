@@ -263,7 +263,14 @@ def sync_single_event_with_firebase_id(client, camera, firebase_event_id, event_
             fecha_fin = datetime.fromtimestamp(end_ts)
         
         duracion_minutos = duration_ms // 60000 if duration_ms else 0
-        estado_firebase = 'RESUELTO' if end_ts else 'EN_CURSO'
+        
+        # 🔧 LÓGICA ESPECIAL PARA EVENTOS EN CURSO:
+        # Los eventos que terminan en "_EN_CURSO" siempre deben mantenerse EN_CURSO
+        # hasta que Firebase indique explícitamente que terminaron
+        if event_type.endswith('_EN_CURSO'):
+            estado_firebase = 'EN_CURSO'
+        else:
+            estado_firebase = 'RESUELTO' if end_ts else 'EN_CURSO'
         
         # Buscar por firebase_event_id
         existing_response = client.table('eventos_temperatura')\
@@ -277,17 +284,15 @@ def sync_single_event_with_firebase_id(client, camera, firebase_event_id, event_
             event_supabase_id = existing_event['id']
             estado_actual = existing_event['estado']
             
-            # 🔧 LÓGICA ESPECIAL: Si el evento está marcado manualmente como EN_CURSO
-            # y es una FALLA_EN_CURSO, NO lo actualices automáticamente a RESUELTO
-            if (estado_actual == 'EN_CURSO' and 
-                event_type == 'FALLA_EN_CURSO' and 
-                estado_firebase == 'RESUELTO'):
-                
-                # Solo actualizar temperatura máxima, pero mantener EN_CURSO
+            # 🔧 LÓGICA ESPECIAL: Si el evento está EN_CURSO en Supabase
+            # y el tipo termina en "_EN_CURSO", mantenerlo EN_CURSO
+            if estado_actual == 'EN_CURSO' and event_type.endswith('_EN_CURSO'):
+                # Solo actualizar duración y temperatura, mantener EN_CURSO
                 update_data = {
+                    'duracion_minutos': duracion_minutos,
                     'temp_max_c': float(max_temp)
                 }
-                logger.info(f"🔒 Manteniendo evento EN_CURSO (corrección manual): {firebase_event_id}")
+                logger.info(f"🔒 Manteniendo evento EN_CURSO: {firebase_event_id} - {event_type}")
                 
             else:
                 # Actualización normal
@@ -297,7 +302,7 @@ def sync_single_event_with_firebase_id(client, camera, firebase_event_id, event_
                     'temp_max_c': float(max_temp),
                     'estado': estado_firebase
                 }
-                logger.info(f"📝 Actualizando evento normal: {firebase_event_id} - {estado_actual} → {estado_firebase}")
+                logger.info(f"📝 Actualizando evento: {firebase_event_id} - {estado_actual} → {estado_firebase}")
             
             result = client.table('eventos_temperatura')\
                 .update(update_data)\
